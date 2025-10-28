@@ -1,70 +1,55 @@
-from urllib.parse import urljoin, urlparse
-import requests
-from bs4 import BeautifulSoup
+from openai import OpenAI
+from webscraper import crawl_headings_with_text
+import chromadb
+from chromadb.config import Settings
+from dotenv import load_dotenv
+import os
+load_dotenv()
 
-def crawl_headings_with_text(base_url, max_depth=2, max_pages=5):
-    visited = set()
-    to_visit = [(base_url, 0)]
-    data = []
-    base_domain = urlparse(base_url).netloc
 
-    while to_visit and len(visited) < max_pages:
-        url, depth = to_visit.pop(0)
-        if url in visited or depth > max_depth:
-            continue
-        visited.add(url)
+api_keys = os.getenv("OPENAI_API_KEY")
 
-        try:
-            resp = requests.get(url, timeout=10)
-            resp.raise_for_status()
-        except requests.RequestException as e:
-            continue
 
-        soup = BeautifulSoup(resp.text, "html.parser")
+client_open = OpenAI(api_key=api_keys)
 
-        for tag in soup.find_all(['h1', 'h2', 'h3']):
-            heading_text = tag.get_text(strip=True)
 
-            link_tag = tag.find('a', href=True)
-            if link_tag:
-                heading_url = urljoin(url, link_tag['href'])
-            else:
-                heading_id = tag.get('id')
-                heading_url = f"{url}#{heading_id}" if heading_id else url
-            section_text = []
-            for sibling in tag.find_next_siblings():
-                if sibling.name and sibling.name in ['h1', 'h2', 'h3']:
-                    break
-                if sibling.name == 'p':
-                    section_text.append(sibling.get_text(strip=True))
-            section_text = " ".join(section_text)
+data = crawl_headings_with_text("https://ku.edu.np/")  
 
-            entry = {
-                "heading": heading_text,
-                "url": heading_url,
-                "text": section_text,
-                "longest_paragraph": ''
-            }
-            if link_tag:
-                try:
-                    sub_resp = requests.get(heading_url, timeout=10)
-                    sub_resp.raise_for_status()
-                    sub_soup = BeautifulSoup(sub_resp.text, "html.parser")
+def get_embedding(text):
+    response = client_open.embeddings.create(
+        model="text-embedding-3-small",
+        input=text
+    )
+    return response.data[0].embedding
 
-                    paragraphs = [p.get_text(strip=True) for p in sub_soup.find_all("p")]
-                    if paragraphs:
-                        longest_p = max(paragraphs, key=len)
-                        entry["longest_paragraph"] = longest_p
-                except requests.RequestException as e:
-                    print(f"Could not fetch")
+for item in data:
+    item['embedding'] = get_embedding(item['heading'])
+    
 
-            data.append(entry)
+client = chromadb.PersistentClient(path="./db")  
+collection = client.get_or_create_collection("website_headings")
 
-        for a in soup.find_all('a', href=True):
-            link = urljoin(url, a['href'])
-            if base_domain in urlparse(link).netloc and link not in visited:
-                to_visit.append((link, depth + 1))
+for i, item in enumerate(data):
+    collection.add(
+        documents=[item['heading']],              
+        metadatas=[{
+            "url": item['url'],
+            "text": item['longest_paragraph']
+        }],         
+        ids=[str(i)],
+        embeddings=[item['embedding']]            
+    )
+    
+query = "Result of Undergraduate"
+query_emb = get_embedding(query)
 
-        print(f"Visited {len(visited)} pages so far")
+results = collection.query(
+    query_embeddings=[query_emb],
+    n_results=1,
+    include=['metadatas', 'documents']
+)
 
-    return data
+print("Heading:", results['documents'][0][0])
+print("URL:", results['metadatas'][0][0]['url'])
+print("Text:", results['metadatas'][0][0].get('text'))
+
