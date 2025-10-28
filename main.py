@@ -1,5 +1,5 @@
 from openai import OpenAI
-from webscraper import crawl_headings_with_text
+from webscraper import webscraped_data
 import chromadb
 from chromadb.config import Settings
 from dotenv import load_dotenv
@@ -13,7 +13,7 @@ api_keys = os.getenv("OPENAI_API_KEY")
 client_open = OpenAI(api_key=api_keys)
 
 
-data = crawl_headings_with_text("https://ku.edu.np/")  
+data = webscraped_data("https://ku.edu.np/")  
 
 def get_embedding(text):
     response = client_open.embeddings.create(

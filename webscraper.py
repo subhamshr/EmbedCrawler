@@ -2,7 +2,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
-def crawl_headings_with_text(base_url, max_depth=2, max_pages=5):
+def webscraped_data(base_url, max_depth=2, max_pages=5):
     visited = set()
     to_visit = [(base_url, 0)]
     data = []
